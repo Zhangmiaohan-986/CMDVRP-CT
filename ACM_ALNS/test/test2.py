@@ -63,71 +63,9 @@ def generate_graph(position_points, seed, prob = 0.75, uav_distance=None):
     G_air = nx.Graph()
     # 添加空中节点
     for i, coord in enumerate(coordinates_air):
-        G_air.add_node(i, pos=coord)
+        G_air.add_edge(coord[0],coord[1])
 
     return G_air
-
-
-def add_random_tree(G, distance_matrix, connect_count, root=0):
-    """
-    生成随机树，将节点随机连接到它的最近邻
-    参数:
-    - G: 无向图
-    - distance_matrix: 节点之间的距离矩阵
-    - connect_count: 记录每个节点的连接次数
-    - root: 起始节点
-
-    返回:
-    - 更新后的无向图 G
-    """
-    num_nodes = len(distance_matrix)
-    visited = [False] * num_nodes  # 记录节点是否已被访问
-    visited[root] = True  # 标记起始节点已访问
-    nodes_to_connect = [root]  # 从根节点开始
-
-    while nodes_to_connect:
-        current_node = nodes_to_connect.pop(0)  # 从树中取一个节点
-
-        # 找到距离最近的节点（未访问）
-        distances = distance_matrix[current_node]
-        sorted_indices = np.argsort(distances)  # 按距离从小到大排序
-
-        connected = False  # 标记当前节点是否进行了连接
-
-        for neighbor in sorted_indices:
-            if neighbor == current_node or visited[neighbor]:
-                continue  # 跳过自己或已经访问的节点
-
-            # 获取当前节点的连接次数，计算连接概率
-            prob = connect_prob(connect_count[current_node])
-
-            # 如果节点从未连接过，强制连接最近的节点
-            if connect_count[current_node] == 0:
-                prob = 1.0  # 确保第一次连接的概率为 100%
-
-            # 判断是否进行连接
-            if random.random() < prob:
-                # 添加边并更新连接计数
-                G.add_edge(current_node, neighbor, weight=distances[neighbor])
-                connect_count[current_node] += 1
-                connect_count[neighbor] += 1
-
-                # 标记该节点为已访问，并加入待连接列表
-                visited[neighbor] = True
-                nodes_to_connect.append(neighbor)
-
-                connected = True  # 表示进行了连接
-
-                # 节点已经被连接过，继续寻找下一个未访问节点
-                if connect_count[current_node] >= 4:  # 假设每个节点最多连接 4 次
-                    break
-
-        # 如果该节点从未连接过，但未找到可以连接的节点，标记为已访问
-        if not connected and connect_count[current_node] == 0:
-            visited[current_node] = True
-
-    return G
-
 
 # 建立塔杆节点连接概率函数
 def connect_prob(connections):
@@ -149,8 +87,11 @@ def compute_distance_matrix(coordinates):
 
 def visualize_tower_connections(G_air, G_groun=None):
     # 绘制空中节点
-    G_air_pos = nx.get_node_attributes(G_air, 'pos')
-    nx.draw(G_air, G_air_pos, with_labels=False, node_color='lightblue', node_size=100, font_size=10)
+    plt.figure(figsize=(10,10))
+    pos = nx.spring_layout(G_air,k=2.5,iterations=220,seed=42)
+    nx.draw(G_air, pos, with_labels=True, node_color='lightblue', node_size=100, font_size=10, edge_color='gray')
+    # 显示图形
+    plt.show()
     # G_air_edge_labels = nx.get_edge_attributes(G_air, 'weight')
     # nx.draw_networkx_edge_labels(G_air, G_air_pos, edge_labels=G_air_edge_labels)
     # # 绘制地面节点
@@ -166,6 +107,6 @@ def visualize_tower_connections(G_air, G_groun=None):
 
 
 if __name__ == '__main__':
-    test_points = generate_points(25,1)
-    G_air = generate_graph(test_points,1)
+    test_points = generate_points(100,1)
+    G_air = generate_graph(test_points,10)
     visualize_tower_connections(G_air)
