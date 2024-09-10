@@ -1,44 +1,34 @@
 import numpy as np
-import random
 import networkx as nx
 import matplotlib.pyplot as plt
 
+# 读取已有节点坐标，假设为 Solomon 数据集中的 xy 坐标
+# 示例: xy 是一个 n x 2 的数组，每一行是一个节点的 xy 坐标
+xy = np.array([
+    [10, 15], [20, 35], [50, 25], [60, 45], [70, 10], [15, 60]
+])
 
-# 定义节点连接的边列表 s 和 t
-def generate_graph_from_edges():
-    # MATLAB 的 s 和 t 定义
-    s = [1, 3, 5, 7, 7] + list(range(10, 101))  # 起点节点
-    t = [2, 4, 6, 8, 9] + list(np.random.randint(10, 101, 91))  # 终点节点
+# 创建空的无向图
+G = nx.Graph()
 
-    # 创建无向图
-    G = nx.Graph()
+# 添加节点，使用 xy 坐标作为节点的属性
+for i, (x, y) in enumerate(xy):
+    G.add_node(i, pos=(x, y))
 
-    # 添加边到图中
-    for i in range(len(s)):
-        G.add_edge(s[i], t[i])
+# 设置距离阈值，决定哪些节点会有连接
+distance_threshold = 30
 
-    return G
+# 添加边，计算节点之间的欧几里得距离，若距离小于阈值，则连边
+for i in range(len(xy)):
+    for j in range(i + 1, len(xy)):
+        dist = np.linalg.norm(xy[i] - xy[j])
+        if dist < distance_threshold:
+            G.add_edge(i, j)
 
+# 获取节点位置
+pos = nx.get_node_attributes(G, 'pos')
 
-# 可视化力导向布局的图
-def visualize_graph(G):
-    plt.figure(figsize=(10, 10))
-
-    # 使用 spring_layout 模拟力导向布局
-    pos = nx.spring_layout(G, k=0.7, iterations=200,seed=42)
-
-    # 绘制节点和边
-    nx.draw(G, pos, with_labels=True, node_color='lightblue', node_size=100, edge_color='gray')
-
-    # 调整显示的紧凑性
-    plt.axis('equal')  # MATLAB 中 axis tight equal 类似的效果
-    plt.title("Force-Directed Layout Graph with Gravity")
-    plt.show()
-
-
-if __name__ == '__main__':
-    # 生成图
-    G = generate_graph_from_edges()
-
-    # 可视化力导向布局
-    visualize_graph(G)
+# 绘制图形
+plt.figure(figsize=(8, 8))
+nx.draw(G, pos, with_labels=True, node_size=500, node_color='skyblue', font_size=10, font_weight='bold')
+plt.show()

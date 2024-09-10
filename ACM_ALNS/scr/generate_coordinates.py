@@ -44,6 +44,7 @@ def generate_graph(position_points, seed, prob = 0.75, uav_distance=None):
     if uav_distance is None:
         uav_distance = 50
     random.seed(seed)
+
     coordinates = list(zip(position_points['XCOORD.'], position_points['YCOORD.']))
     # 空地节点数目
     num_air = math.floor(len(coordinates) * 3/5)
@@ -64,70 +65,69 @@ def generate_graph(position_points, seed, prob = 0.75, uav_distance=None):
     # 添加空中节点
     for i, coord in enumerate(coordinates_air):
         G_air.add_node(i, pos=coord)
-
+    # 添加空中边的连接
+    G_air = add_random_tree(G_air,coordinates_air_matrix,coordinates_air)
     return G_air
 
-
-def add_random_tree(G, distance_matrix, connect_count, root=0):
-    """
-    生成随机树，将节点随机连接到它的最近邻
-    参数:
-    - G: 无向图
-    - distance_matrix: 节点之间的距离矩阵
-    - connect_count: 记录每个节点的连接次数
-    - root: 起始节点
-
-    返回:
-    - 更新后的无向图 G
-    """
+# 生成随机树的函数
+def add_random_tree(G, distance_matrix, coordinates):
     num_nodes = len(distance_matrix)
-    visited = [False] * num_nodes  # 记录节点是否已被访问
-    visited[root] = True  # 标记起始节点已访问
-    nodes_to_connect = [root]  # 从根节点开始
-
-    while nodes_to_connect:
-        current_node = nodes_to_connect.pop(0)  # 从树中取一个节点
-
-        # 找到距离最近的节点（未访问）
-        distances = distance_matrix[current_node]
-        sorted_indices = np.argsort(distances)  # 按距离从小到大排序
-
-        connected = False  # 标记当前节点是否进行了连接
-
-        for neighbor in sorted_indices:
-            if neighbor == current_node or visited[neighbor]:
-                continue  # 跳过自己或已经访问的节点
-
-            # 获取当前节点的连接次数，计算连接概率
-            prob = connect_prob(connect_count[current_node])
-
-            # 如果节点从未连接过，强制连接最近的节点
-            if connect_count[current_node] == 0:
-                prob = 1.0  # 确保第一次连接的概率为 100%
-
-            # 判断是否进行连接
-            if random.random() < prob:
-                # 添加边并更新连接计数
-                G.add_edge(current_node, neighbor, weight=distances[neighbor])
-                connect_count[current_node] += 1
-                connect_count[neighbor] += 1
-
-                # 标记该节点为已访问，并加入待连接列表
-                visited[neighbor] = True
-                nodes_to_connect.append(neighbor)
-
-                connected = True  # 表示进行了连接
-
-                # 节点已经被连接过，继续寻找下一个未访问节点
-                if connect_count[current_node] >= 4:  # 假设每个节点最多连接 4 次
-                    break
-
-        # 如果该节点从未连接过，但未找到可以连接的节点，标记为已访问
-        if not connected and connect_count[current_node] == 0:
-            visited[current_node] = True
-
+    visited = np.full((num_nodes,num_nodes),False)
+    coordinates_origin = (0,0)
+    distance_origin = compute_distance_matrix(coordinates, coordinates_origin)
+    sorted_indices_origin = np.argsort(distance_origin)[0,0]
+    near_path = find_nearest_path(distance_matrix,sorted_indices_origin)
+    connect_count = {i: 0 for i in range(num_nodes)}
+    for i in range(len(near_path)-1):
+        current = near_path[i]
+        next_current = near_path[i+1]
+        current_prob = connect_prob(connect_count[current])
+        if random.random() < current_prob:
+            G.add_edge(current,next_current,weight=distance_matrix[current,next_current])
+            connect_count[current] += 1
+            connect_count[next_current] += 1
+            visited[current,next_current] = True
+            visited[next_current,current] = True
+    # 继续遍历未连接的节点，按 50% 概率连接
+    for current in near_path:
+        # 获取当前节点的距离排序
+        sorted_neighbors = np.argsort(distance_matrix[current])
+        for neighbor in sorted_neighbors:
+            # 检查连接是否已经存在，且是否当前节点和邻居节点不是同一节点
+            if not visited[current, neighbor] and current != neighbor:
+                # 仅当两个节点的连接次数都少于 3 时才考虑连接
+                if connect_count[current] < 3 and connect_count[neighbor] < 10:
+                    # 50% 概率连接
+                    # 连接最近的节点（确保 neighbor 也是 current 最近的）
+                    # if sorted_neighbors[1] == neighbor or sorted_neighbors[0] == neighbor:
+                    if random.random() < connect_prob(connect_count[current]):
+                        # 添加边并更新连接计数
+                        G.add_edge(current, neighbor, weight=distance_matrix[current, neighbor])
+                        visited[current, neighbor] = True
+                        visited[neighbor, current] = True
+                        connect_count[current] += 1
+                        connect_count[neighbor] += 1
     return G
 
+def find_nearest_path(distance_matrix, start_index):
+    num_nodes = len(distance_matrix)
+    visited = [False]*num_nodes
+    path = []
+    current_node = start_index
+    while len(path)<num_nodes:
+        visited[current_node] = True
+        path.append(current_node)
+        distance = distance_matrix[current_node]
+        sorted_indices = np.argsort(distance)
+        found_next = False
+        for neighbor in sorted_indices:
+            if not visited[neighbor] and neighbor != current_node:
+                current_node = neighbor
+                found_next = True
+                break
+        if not found_next:
+            break  # 没有找到未访问的邻居节点，结束循环
+    return path
 
 # 建立塔杆节点连接概率函数
 def connect_prob(connections):
@@ -137,35 +137,97 @@ def connect_prob(connections):
     return max(0,1.0-0.2*connections)
 
 # 生成获得的距离矩阵
-def compute_distance_matrix(coordinates):
+def compute_distance_matrix(coordinates, origin=None):
     num_coordinates = len(coordinates)
-    distance_matrix = np.zeros((num_coordinates, num_coordinates))
-    for i in range(num_coordinates):
-        for j in range(i + 1, num_coordinates):
-            distance_matrix[i,j] = np.linalg.norm(np.array(coordinates[i]) - np.array(coordinates[j]))
-            distance_matrix[j,i] = distance_matrix[i,j]
-    return distance_matrix
+    if origin is None:
+        distance_matrix = np.zeros((num_coordinates, num_coordinates))
+        for i in range(num_coordinates):
+            for j in range(i + 1, num_coordinates):
+                distance_matrix[i,j] = np.linalg.norm(np.array(coordinates[i]) - np.array(coordinates[j]))
+                distance_matrix[j,i] = distance_matrix[i,j]
+        return distance_matrix
+    else:
+        # 计算所有节点到原点的距离
+        distance_matrix = np.linalg.norm(np.array(coordinates) - np.array(origin), axis=1).reshape(1, -1)
+        return distance_matrix
 
 
-def visualize_tower_connections(G_air, G_groun=None):
-    # 绘制空中节点
+def visualize_tower_connections(G_air, G_ground=None):
+    """
+    可视化塔杆节点和线路，空中和地面节点分别绘制，带有图例和节点标注。
+    """
+    plt.figure(figsize=(12, 12))
+    # 获取空中节点的坐标
     G_air_pos = nx.get_node_attributes(G_air, 'pos')
-    nx.draw(G_air, G_air_pos, with_labels=False, node_color='lightblue', node_size=100, font_size=10)
-    # G_air_edge_labels = nx.get_edge_attributes(G_air, 'weight')
-    # nx.draw_networkx_edge_labels(G_air, G_air_pos, edge_labels=G_air_edge_labels)
-    # # 绘制地面节点
-    # G_ground_pos = nx.get_node_attributes(G_ground, 'pos')  # 获取 G_ground 节点的位置信息
-    # nx.draw(G_ground, G_ground_pos, with_labels=False, node_color='lightgreen', edge_color='green', node_size=100,
-    #         font_size=10, label='Ground Nodes')
-    # G_ground_edge_labels = nx.get_edge_attributes(G_ground, 'weight')  # 获取 G_ground 的边权重
-    # nx.draw_networkx_edge_labels(G_ground, G_ground_pos, edge_labels=G_ground_edge_labels)
-    # # 设置图例，区分空中节点和地面节点
-    # plt.legend(['Air Nodes', 'Ground Nodes'])
+    # 绘制空中节点：蓝色，较大，透明度alpha调整
+    nx.draw_networkx_nodes(G_air, G_air_pos, node_size=130, node_color='red', alpha=1.0, label='Air Nodes')
+    # 获取空中边的权重并绘制边：蓝色虚线，带宽度
+    air_edges = list(G_air.edges())
+    nx.draw_networkx_edges(G_air, G_air_pos, edgelist=air_edges, edge_color='blue', style='dashed', width=3, alpha=0.6, label='Air Edges')
+
+    # 如果有地面节点，绘制地面节点和边
+    if G_ground:
+        G_ground_pos = nx.get_node_attributes(G_ground, 'pos')
+
+        # 绘制地面节点：绿色，较小
+        nx.draw_networkx_nodes(G_ground, G_ground_pos, node_size=80, node_color='green', alpha=0.8, label='Ground Nodes')
+
+        # 绘制地面边：绿色实线
+        ground_edges = list(G_ground.edges())
+        nx.draw_networkx_edges(G_ground, G_ground_pos, edgelist=ground_edges, edge_color='green', style='solid', width=1.5, alpha=0.6, label='Ground Edges')
+
+        # 地面节点标注：字体大小10
+        ground_labels = {n: str(n) for n in G_ground.nodes()}
+        nx.draw_networkx_labels(G_ground, G_ground_pos, ground_labels, font_size=10, font_color='black')
+
+        # 绘制地面边的权重（如有）：字体大小8
+        ground_edge_labels = nx.get_edge_attributes(G_ground, 'weight')
+        nx.draw_networkx_edge_labels(G_ground, G_ground_pos, edge_labels=ground_edge_labels, font_size=8, font_color='green')
+
+    x_values_air = [coord[0] for coord in G_air_pos.values()]
+    y_values_air = [coord[1] for coord in G_air_pos.values()]
+
+    # 设置X轴和Y轴的范围，确保包含所有节点
+    plt.xlim(min(x_values_air) - 10, max(x_values_air) + 10)  # 给X轴增加一些边距
+    plt.ylim(min(y_values_air) - 10, max(y_values_air) + 10)  # 给Y轴增加一些边距
+
+    # 设置X轴和Y轴的坐标刻度
+    plt.xticks(range(int(min(x_values_air)) - 10, int(max(x_values_air)) + 10, 10))
+    plt.yticks(range(int(min(y_values_air)) - 10, int(max(y_values_air)) + 10, 10))
+
+    # 设置坐标轴的标签
+    plt.xlabel("X Coordinate", fontsize=12)
+    plt.ylabel("Y Coordinate", fontsize=12)
+
+    # 显示网格
+    plt.grid(True)
+
+    # 确保坐标轴显示
+    ax = plt.gca()  # 获取当前的轴
+    ax.spines['left'].set_position('zero')  # 显示左轴
+    ax.spines['bottom'].set_position('zero')  # 显示底轴
+    ax.spines['right'].set_color('none')  # 隐藏右轴
+    ax.spines['top'].set_color('none')  # 隐藏上轴
+    ax.xaxis.set_ticks_position('bottom')  # X轴刻度显示在下方
+    ax.yaxis.set_ticks_position('left')  # Y轴刻度显示在左边
+
+    ax.spines['left'].set_linewidth(5)  # 设置左轴线条宽度
+    ax.spines['bottom'].set_linewidth(5)  # 设置底轴线条宽度
+    # 设置图例，区分空中节点、地面节点和各类边
+    plt.legend(loc='upper right', fontsize=15)
+
+    # 使用 adjustable='box' 解决 axis('equal') 覆盖坐标轴比例的问题
+    # plt.gca().set_aspect('equal', adjustable='box')
+
+    # 设置标题
+    plt.title("Visualized Tower and Ground Connections", fontsize=16)
+
     # 显示图形
     plt.show()
-
-
+# 示例代码 (需要自定义 G_air 和 G_ground 的内容)
 if __name__ == '__main__':
-    test_points = generate_points(25,1)
-    G_air = generate_graph(test_points,1)
+    test_points = generate_points(50, 6)  # 使用 generate_points 函数生成测试点
+    G_air = generate_graph(test_points, 1)  # 使用 generate_graph 函数生成空中图
+
+    # 可视化塔杆节点和线路
     visualize_tower_connections(G_air)
