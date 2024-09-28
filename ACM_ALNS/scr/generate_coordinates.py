@@ -38,13 +38,30 @@ def generate_points(num_points,seed):
         position_points_sample = df_combine.sample(n=num_points,random_state=seed)
         position_points_sample = position_points_sample.sort_index()
         return position_points_sample # 输出pd格式的
+def generates_points(num_points,seed):
+    file_path_R1 = '/Users/zhangmiaohan/PycharmProjects/gurobi_test/tits_CMDVRP-CT/map/homberger_400_customer_instances/R1_4_1.TXT'
+    np.random.seed(seed)
+    with open(file_path_R1, 'r') as file:
+        data0_R1 = file.read()
+    # 将数据转换为DataFrame
+    data_R1 = []
+    for line in data0_R1.strip().split('\n'):
+        data_R1.append(line.split())
+    columns = ["CUST", "XCOORD.", 'YCOORD.', 'DEMAND', 'READY', 'DUE', 'SERVICE']
+    df_R1 = pd.DataFrame(data_R1[1:], columns=columns)
+    # 将字符型列转换为数字
+    numeric_cols = ['CUST', 'XCOORD.', 'YCOORD.', 'DEMAND', 'READY', 'DUE', 'SERVICE']
+    df_R1[numeric_cols] = df_R1[numeric_cols].apply(pd.to_numeric, errors='coerce')
+    position_points_sample = df_R1.sample(n=num_points,random_state=seed)
+    position_points_sample = position_points_sample.sort_index()
+    return position_points_sample # 输出pd格式的
+
 
 # 基于所得到的测试坐标图例，设计得到无向图
 def generate_graph(position_points, seed, prob = 0.75, uav_distance=None):
     if uav_distance is None:
         uav_distance = 50
     random.seed(seed)
-
     coordinates = list(zip(position_points['XCOORD.'], position_points['YCOORD.']))
     # 空地节点数目
     num_air = math.floor(len(coordinates) * 3/5)
@@ -57,9 +74,6 @@ def generate_graph(position_points, seed, prob = 0.75, uav_distance=None):
     coordinates_ground_matrix = compute_distance_matrix(coordinates_ground)
     max_distance_air = np.max(coordinates_air_matrix)
     max_distance_ground = np.max(coordinates_ground_matrix)
-    # 初始化节点连接次数
-    connect_count_air = {i:0 for i in range(len(coordinates_air))}
-    connect_count_gorund = {i:0 for i in range(len(coordinates_ground))}
     # 创建空中无向图
     G_air = nx.Graph()
     # 添加空中节点
@@ -67,10 +81,23 @@ def generate_graph(position_points, seed, prob = 0.75, uav_distance=None):
         G_air.add_node(i, pos=coord)
     # 添加空中边的连接
     G_air = add_random_tree(G_air,coordinates_air_matrix,coordinates_air)
-    return G_air
+    # 创建地面节点
+    G_ground = nx.Graph()
+    for i, coord in enumerate(coordinates_ground):
+        G_ground.add_node(i, pos=coord)
+    G_ground = add_random_tree(G_ground,coordinates_ground_matrix,coordinates_ground,4)
+    # 获取空地距离矩阵及邻接矩阵
+    air_adj_matrix = np.array(nx.adjacency_matrix(G_air).todense())
+    air_pos = nx.get_node_attributes(G_air, 'pos')
+    ground_adj_matrix = np.array(nx.adjacency_matrix(G_ground).todense())
+    ground_pos = nx.get_node_attributes(G_ground, 'pos')
+
+    return G_air,G_ground,air_adj_matrix,air_pos,ground_adj_matrix,ground_pos
 
 # 生成随机树的函数
-def add_random_tree(G, distance_matrix, coordinates):
+def add_random_tree(G, distance_matrix, coordinates, max_connect_num=None):
+    if max_connect_num is None:
+        max_connect_num = 3
     num_nodes = len(distance_matrix)
     visited = np.full((num_nodes,num_nodes),False)
     coordinates_origin = (0,0)
@@ -96,7 +123,7 @@ def add_random_tree(G, distance_matrix, coordinates):
             # 检查连接是否已经存在，且是否当前节点和邻居节点不是同一节点
             if not visited[current, neighbor] and current != neighbor:
                 # 仅当两个节点的连接次数都少于 3 时才考虑连接
-                if connect_count[current] < 3 and connect_count[neighbor] < 10:
+                if connect_count[current] < max_connect_num and connect_count[neighbor] < 10:
                     # 50% 概率连接
                     # 连接最近的节点（确保 neighbor 也是 current 最近的）
                     # if sorted_neighbors[1] == neighbor or sorted_neighbors[0] == neighbor:
@@ -151,83 +178,71 @@ def compute_distance_matrix(coordinates, origin=None):
         distance_matrix = np.linalg.norm(np.array(coordinates) - np.array(origin), axis=1).reshape(1, -1)
         return distance_matrix
 
+from mpl_toolkits.mplot3d import Axes3D
+def visualize_tower_connections(G_air, G_ground):
+    fig = plt.figure(figsize=(12, 12))
+    ax = fig.add_subplot(111, projection='3d')
 
-def visualize_tower_connections(G_air, G_ground=None):
-    """
-    可视化塔杆节点和线路，空中和地面节点分别绘制，带有图例和节点标注。
-    """
-    plt.figure(figsize=(12, 12))
-    # 获取空中节点的坐标
     G_air_pos = nx.get_node_attributes(G_air, 'pos')
-    # 绘制空中节点：蓝色，较大，透明度alpha调整
-    nx.draw_networkx_nodes(G_air, G_air_pos, node_size=130, node_color='red', alpha=1.0, label='Air Nodes')
-    # 获取空中边的权重并绘制边：蓝色虚线，带宽度
-    air_edges = list(G_air.edges())
-    nx.draw_networkx_edges(G_air, G_air_pos, edgelist=air_edges, edge_color='blue', style='dashed', width=3, alpha=0.6, label='Air Edges')
+    G_air_pos_3d = {node: (x, y, 20) for node, (x, y) in G_air_pos.items()}
 
-    # 如果有地面节点，绘制地面节点和边
-    if G_ground:
-        G_ground_pos = nx.get_node_attributes(G_ground, 'pos')
+    air_x = [coord[0] for coord in G_air_pos_3d.values()]
+    air_y = [coord[1] for coord in G_air_pos_3d.values()]
+    air_z = [coord[2] for coord in G_air_pos_3d.values()]
 
-        # 绘制地面节点：绿色，较小
-        nx.draw_networkx_nodes(G_ground, G_ground_pos, node_size=80, node_color='green', alpha=0.8, label='Ground Nodes')
+    ax.scatter(air_x, air_y, air_z, c='red', label='Air Nodes')
+    # # 添加空中节点的标签
+    # for node, (x, y, z) in G_air_pos_3d.items():
+    #     ax.text(x, y, z, f'{node}', fontsize=10, color='black')  # 标签显示节点编号
 
-        # 绘制地面边：绿色实线
-        ground_edges = list(G_ground.edges())
-        nx.draw_networkx_edges(G_ground, G_ground_pos, edgelist=ground_edges, edge_color='green', style='solid', width=1.5, alpha=0.6, label='Ground Edges')
 
-        # 地面节点标注：字体大小10
-        ground_labels = {n: str(n) for n in G_ground.nodes()}
-        nx.draw_networkx_labels(G_ground, G_ground_pos, ground_labels, font_size=10, font_color='black')
+    for edge in G_air.edges():
+        node1, node2 = edge
+        x_values = [G_air_pos_3d[node1][0], G_air_pos_3d[node2][0]]
+        y_values = [G_air_pos_3d[node1][1], G_air_pos_3d[node2][1]]
+        z_values = [G_air_pos_3d[node1][2], G_air_pos_3d[node2][2]]
+        ax.plot(x_values, y_values, z_values, color='blue', linestyle='dashed', linewidth=2, alpha=0.6)
 
-        # 绘制地面边的权重（如有）：字体大小8
-        ground_edge_labels = nx.get_edge_attributes(G_ground, 'weight')
-        nx.draw_networkx_edge_labels(G_ground, G_ground_pos, edge_labels=ground_edge_labels, font_size=8, font_color='green')
+    # 地面节点绘制
+    G_ground_pos = nx.get_node_attributes(G_ground, 'pos')
+    G_ground_pos_3d = {node: (x, y, 0) for node, (x, y) in G_ground_pos.items()}
 
-    x_values_air = [coord[0] for coord in G_air_pos.values()]
-    y_values_air = [coord[1] for coord in G_air_pos.values()]
 
-    # 设置X轴和Y轴的范围，确保包含所有节点
-    plt.xlim(min(x_values_air) - 10, max(x_values_air) + 10)  # 给X轴增加一些边距
-    plt.ylim(min(y_values_air) - 10, max(y_values_air) + 10)  # 给Y轴增加一些边距
+    ground_x = [coord[0] for coord in G_ground_pos_3d.values()]
+    ground_y = [coord[1] for coord in G_ground_pos_3d.values()]
+    ground_z = [coord[2] for coord in G_ground_pos_3d.values()]
 
-    # 设置X轴和Y轴的坐标刻度
-    plt.xticks(range(int(min(x_values_air)) - 10, int(max(x_values_air)) + 10, 10))
-    plt.yticks(range(int(min(y_values_air)) - 10, int(max(y_values_air)) + 10, 10))
+    ax.scatter(ground_x, ground_y, ground_z, c='b', marker='o', label='Ground Nodes')
+    # 添加地面节点的标签
+    # for node, (x, y, z) in G_ground_pos_3d.items():
+    #     ax.text(x, y, z, f'{node}', fontsize=10, color='black')  # 标签显示节点编号
 
-    # 设置坐标轴的标签
-    plt.xlabel("X Coordinate", fontsize=12)
-    plt.ylabel("Y Coordinate", fontsize=12)
+    for edge in G_ground.edges():
+        node1, node2 = edge
+        x_values_ground = [G_ground_pos_3d[node1][0], G_ground_pos_3d[node2][0]]
+        y_values_ground = [G_ground_pos_3d[node1][1], G_ground_pos_3d[node2][1]]
+        z_values_ground = [G_ground_pos_3d[node1][2], G_ground_pos_3d[node2][2]]
+        ax.plot(x_values_ground, y_values_ground, z_values_ground, color='yellow',  linewidth=2, alpha=0.6)
 
-    # 显示网格
-    plt.grid(True)
+    ax.set_xlim(min(air_x) - 10, max(air_x) + 10)
+    ax.set_ylim(min(air_y) - 10, max(air_y) + 10)
+    ax.set_zlim(0, 25)
 
-    # 确保坐标轴显示
-    ax = plt.gca()  # 获取当前的轴
-    ax.spines['left'].set_position('zero')  # 显示左轴
-    ax.spines['bottom'].set_position('zero')  # 显示底轴
-    ax.spines['right'].set_color('none')  # 隐藏右轴
-    ax.spines['top'].set_color('none')  # 隐藏上轴
-    ax.xaxis.set_ticks_position('bottom')  # X轴刻度显示在下方
-    ax.yaxis.set_ticks_position('left')  # Y轴刻度显示在左边
+    ax.set_xlabel('X Coordinate', fontsize=12)
+    ax.set_ylabel('Y Coordinate', fontsize=12)
+    ax.set_zlabel('Z Coordinate', fontsize=12)
+    ax.grid(True)
+    ax.legend(loc='upper right', fontsize=12)
 
-    ax.spines['left'].set_linewidth(5)  # 设置左轴线条宽度
-    ax.spines['bottom'].set_linewidth(5)  # 设置底轴线条宽度
-    # 设置图例，区分空中节点、地面节点和各类边
-    plt.legend(loc='upper right', fontsize=15)
+    plt.title("Benchmark Graph of a 50-Node Dual-Layer Road Network. test_points:6. generate_graph:1", fontsize=16)
+    # # 使用plt.savefig()并指定参数
+    # plt.savefig('/Users/zhangmiaohan/PycharmProjects/gurobi_test/tits_CMDVRP-CT/map/env_map/100节点示意图1.1.jpg', dpi=300, bbox_inches='tight', pad_inches=0)
+    plt.show()  # 本地显示图形
 
-    # 使用 adjustable='box' 解决 axis('equal') 覆盖坐标轴比例的问题
-    # plt.gca().set_aspect('equal', adjustable='box')
-
-    # 设置标题
-    plt.title("Visualized Tower and Ground Connections", fontsize=16)
-
-    # 显示图形
-    plt.show()
-# 示例代码 (需要自定义 G_air 和 G_ground 的内容)
+# 示例代码
 if __name__ == '__main__':
     test_points = generate_points(50, 6)  # 使用 generate_points 函数生成测试点
-    G_air = generate_graph(test_points, 1)  # 使用 generate_graph 函数生成空中图
-
+    # test_points = generates_points(50, 6)  # 使用 generates_points 函数生成测试点
+    G_air, G_ground, air_adj_matrix, air_positions, ground_adj_matrix, ground_positions = generate_graph(test_points, 1)# 使用 generate_graph 函数生成空中图
     # 可视化塔杆节点和线路
-    visualize_tower_connections(G_air)
+    # visualize_tower_connections(G_air,G_ground)
