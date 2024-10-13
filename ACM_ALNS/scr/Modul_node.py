@@ -14,6 +14,10 @@ class Node:
         self.id = node_id
         self.x = x
         self.y = y
+        if node_type == 'air':
+            self.z = 20
+        else:
+            self.z = 0
         self.type = node_type  # 'air' 或 'ground'
         self.adjacent = []  # 邻接节点列表
 
@@ -55,19 +59,27 @@ class Graph:
 
 # 定义车辆类
 class Vehicle:
-    def __init__(self, vehicle_id, capacity, start_node_id):
+    def __init__(self, vehicle_id, capacity, start_node_id, speed=12.5):
         """
         初始化车辆
         :param vehicle_id: 车辆编号
         :param capacity: 车辆容量（携带无人机数量）
         :param start_node_id: 车辆起始节点编号
         """
+        # self.id = vehicle_id
         self.id = vehicle_id
         self.capacity = capacity
         self.route = []  # 车辆路径，存储节点编号的列表
         self.drones = []  # 车辆携带的无人机列表
         self.start_node_id = start_node_id
+        self.speed = speed # 车辆速度为12.5km/h
+        self.work_time = 3 # 辅助收放电时间为3min
         self.completion_time = 0  # 完成时间
+        self.type = 'vehicle'
+        self.launch = {}
+        self.recover = {}
+        self.launch_recover = {}
+        self.time = []
 
     def add_drone(self, drone):
         """
@@ -125,7 +137,7 @@ class Vehicle:
 
 # 定义无人机类
 class Drone:
-    def __init__(self, drone_id, endurance, speed):
+    def __init__(self, drone_id, endurance=30, task_speed=12.5, speed=25):
         """
         初始化无人机
         :param drone_id: 无人机编号
@@ -134,9 +146,15 @@ class Drone:
         """
         self.id = drone_id
         self.endurance = endurance
+        self.task_speed = task_speed
         self.speed = speed
         self.route = []  # 无人机巡检路径，存储节点编号的列表
+        self.time = []
         self.completion_time = 0  # 完成时间
+        self.type = 'drone'
+        self.launch = {}
+        self.recover = {}
+        self.launch_recover = {}
 
     def set_route(self, route):
         """

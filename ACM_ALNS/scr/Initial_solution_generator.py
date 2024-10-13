@@ -1,5 +1,6 @@
+from sklearn.cluster import SpectralClustering
 import numpy as np
-from sklearn.cluster import KMeans
+from sklearn.metrics.pairwise import rbf_kernel
 import random
 
 # 从Modul_node.py导入必要的类
@@ -42,35 +43,91 @@ class EncoderDecoder:
 
 # 2. 聚类与分配模块
 class ClusteringAllocator:
-    def cluster_ground_nodes(self, ground_nodes, num_vehicles):
+    def spectral_clustering_air_nodes(self, air_graph, num_clusters):
         """
-        使用K-means聚类算法将地面节点分配给车辆。
-        :param ground_nodes: 地面节点列表
-        :param num_vehicles: 车辆数量
-        :return: 车辆聚类字典，键为车辆编号，值为分配的节点列表
+        对空中节点进行谱聚类
+        :param air_graph: 空中网络的Graph对象
+        :param num_clusters: 聚类的簇数（车辆数量）
+        :return: 一个字典，键为聚类标签，值为对应的空中节点列表
         """
-        coords = np.array([[node.x, node.y] for node in ground_nodes])
-        kmeans = KMeans(n_clusters=num_vehicles, random_state=0).fit(coords)
-        labels = kmeans.labels_
-        vehicle_clusters = {i: [] for i in range(num_vehicles)}
-        for idx, label in enumerate(labels):
-            vehicle_clusters[label].append(ground_nodes[idx])
-        return vehicle_clusters
+        # 获取空中节点的列表和节点编号列表
+        air_nodes = list(air_graph.nodes.values())
+        node_ids = [node.id for node in air_nodes]
+        num_nodes = len(node_ids)
+        # 创建节点编号到索引的映射
+        node_id_to_index = {node_id: idx for idx, node_id in enumerate(node_ids)}
+        # 初始化邻接矩阵
+        adjacency_matrix = np.zeros((num_nodes, num_nodes))
+        # 填充邻接矩阵
+        for (node1_id, node2_id), weight in air_graph.edges.items():
+            idx1 = node_id_to_index[node1_id]
+            idx2 = node_id_to_index[node2_id]
+            adjacency_matrix[idx1, idx2] = weight
+            adjacency_matrix[idx2, idx1] = weight  # 无向图，矩阵对称
+        # 使用邻接矩阵作为相似度矩阵
+        spectral = SpectralClustering(
+            n_clusters=num_clusters,
+            affinity='precomputed',
+            assign_labels='kmeans',
+            random_state=0
+        )
+        labels = spectral.fit_predict(adjacency_matrix)
+        # 将节点按照聚类标签分组
+        air_clusters = {}
+        for label, node in zip(labels, air_nodes):
+            if label not in air_clusters:
+                air_clusters[label] = []
+            air_clusters[label].append(node)
+        return air_clusters, adjacency_matrix
 
-    def cluster_air_nodes(self, air_nodes, num_drones):
+    def cluster_ground_nodes(self, air_clusters, ground_graph):
         """
-        使用K-means聚类算法将空中节点分配给无人机。
-        :param air_nodes: 空中节点列表
-        :param num_drones: 无人机数量
-        :return: 无人机聚类字典，键为无人机编号，值为分配的节点列表
+        基于空中聚类的质心，将地面节点映射到空中节点聚类
+        :param air_clusters: 一个字典，键为聚类标签，值为对应的空中节点列表
+        :param ground_graph: 地面网络的 Graph 对象
+        :return: 一个字典，键为聚类标签，值为对应的地面节点列表
         """
-        coords = np.array([[node.x, node.y] for node in air_nodes])
-        kmeans = KMeans(n_clusters=num_drones, random_state=0).fit(coords)
-        labels = kmeans.labels_
-        drone_clusters = {i: [] for i in range(num_drones)}
-        for idx, label in enumerate(labels):
-            drone_clusters[label].append(air_nodes[idx])
-        return drone_clusters
+        # 计算每个空中聚类的质心
+        cluster_centers = {}
+        # 获取地面节点列表和节点编号列表
+        ground_nodes = list(ground_graph.nodes.values())
+        ground_node_ids = [node.id for node in ground_nodes]
+        num_ground_nodes = len(ground_node_ids)
+        # 计算每个空中聚类的质心
+        for label, nodes in air_clusters.items():
+            coords = np.array([[node.x, node.y, node.z] for node in nodes])
+            centroid = coords.mean(axis=0)
+            cluster_centers[label] = centroid
+        # 获取地面节点列表
+        ground_nodes = list(ground_graph.nodes.values())
+        # 初始化地面聚类字典
+        ground_clusters = {label: [] for label in air_clusters.keys()}
+        # 将地面节点映射到最近的空中聚类质心
+        for node in ground_nodes:
+            point = np.array([node.x, node.y, node.z])
+            min_distance = float('inf')
+            nearest_label = None
+            for label, centroid in cluster_centers.items():
+                distance = np.linalg.norm(point - centroid)
+                if distance < min_distance:
+                    min_distance = distance
+                    nearest_label = label
+            ground_clusters[nearest_label].append(node)
+
+            # 创建节点编号到索引的映射
+        node_id_to_index = {node_id: idx for idx, node_id in enumerate(ground_node_ids)}
+
+        # 初始化地面节点的邻接矩阵
+        ground_adjacency_matrix = np.zeros((num_ground_nodes, num_ground_nodes))
+
+        # 填充邻接矩阵
+        for (node1_id, node2_id), weight in ground_graph.edges.items():
+            idx1 = node_id_to_index[node1_id]
+            idx2 = node_id_to_index[node2_id]
+            ground_adjacency_matrix[idx1, idx2] = weight
+            ground_adjacency_matrix[idx2, idx1] = weight  # 无向图，矩阵对称
+
+        return ground_clusters, ground_adjacency_matrix
 
 # 3. 初始路径生成模块
 class InitialPathGenerator:
@@ -184,7 +241,7 @@ class ObjectiveFunction:
 
 # 6. 初始解生成模块
 class InitialSolutionGenerator:
-    def __init__(self, ground_graph, air_graph, vehicles, drones):
+    def __init__(self, ground_graph, air_graph, vehicles, drones, air_clusters, ground_clusters, air_adj_matrix, ground_adj_matrix, vehicle_node_start_id=None):
         """
         初始化初始解生成器。
         :param ground_graph: 地面网络Graph对象
@@ -196,30 +253,41 @@ class InitialSolutionGenerator:
         self.air_graph = air_graph
         self.vehicles = vehicles
         self.drones = drones
-        self.encoder_decoder = EncoderDecoder()
-        self.clustering_allocator = ClusteringAllocator()
-        self.path_generator = InitialPathGenerator()
-        self.constraint_handler = ConstraintHandler()
-        self.objective_function = ObjectiveFunction()
+        self.air_clusters = air_clusters
+        self.ground_clusters = ground_clusters
+        self.air_adj_matrix = air_adj_matrix
+        self.ground_adj_matrix = ground_adj_matrix
+        self.start_node = vehicle_node_start_id
+        # self.encoder_decoder = EncoderDecoder()
+        # self.clustering_allocator = ClusteringAllocator()
+        # self.path_generator = InitialPathGenerator()
+        # self.constraint_handler = ConstraintHandler()
+        # self.objective_function = ObjectiveFunction()
+
+        # self.encoder_decoder = EncoderDecoder()
+        # self.clustering_allocator = ClusteringAllocator()
+        # self.path_generator = InitialPathGenerator()
+        # self.constraint_handler = ConstraintHandler()
+        # self.objective_function = ObjectiveFunction()
+    def generate_vehicle_route(self):
+        from route_plan import neighbour_plan
+        vehicle_id = list(self.vehicles.keys())
+        id_num = 0
+        for ground_vehicle in self.ground_clusters.values():
+            vehicle_nodes = []
+            for vehicle_node in ground_vehicle:
+                vehicle_nodes.append(vehicle_node.id)
+            # 使用贪心算法生成车辆路径
+            vehicle_route = neighbour_plan(vehicle_nodes, self.ground_adj_matrix, self.start_node)
+            self.vehicles[vehicle_id].route = vehicle_route
+            id_num += 1
+        return self.vehicles # 两个车辆的初始路径任务分配
 
     def generate_initial_solution(self):
-        # 2.1 聚类分配
-        vehicle_clusters = self.clustering_allocator.cluster_ground_nodes(
-            ground_nodes=list(self.ground_graph.nodes.values()),
-            num_vehicles=len(self.vehicles)
-        )
-        drone_clusters = self.clustering_allocator.cluster_air_nodes(
-            air_nodes=list(self.air_graph.nodes.values()),
-            num_drones=len(self.drones)
-        )
+        self.generate_vehicle_route() # 得到两个车辆初始路径
 
-        # 分配聚类结果给车辆
-        for vehicle_id, cluster in vehicle_clusters.items():
-            self.vehicles[vehicle_id].route = [node.id for node in cluster]
 
-        # 分配聚类结果给无人机
-        for drone_id, cluster in drone_clusters.items():
-            self.drones[drone_id].route = [node.id for node in cluster]
+
 
         # 3.1 生成车辆初始路径
         for vehicle in self.vehicles:

@@ -21,11 +21,12 @@ def generate_points(num_points,seed):
     # 将字符型列转换为数字
     numeric_cols = ['CUST', 'XCOORD.', 'YCOORD.', 'DEMAND', 'READY', 'DUE', 'SERVICE']
     df_R201[numeric_cols] = df_R201[numeric_cols].apply(pd.to_numeric, errors='coerce')
+    start_pos = (float(df_R201.at[0, 'XCOORD.']), float(df_R201.at[0, 'YCOORD.']))
     if num_points <= 100:
         # position_points = df_R201[0:num_points+1]
         position_points_sample = df_R201.sample(n=num_points,random_state=seed)
         position_points_sample = position_points_sample.sort_index()
-        return position_points_sample
+        return position_points_sample, start_pos
     else:
         with open(file_path_RC101, 'r') as file:
             data0_RC101 = file.read()
@@ -37,7 +38,9 @@ def generate_points(num_points,seed):
         df_combine = pd.concat([df_R201, df_RC101], ignore_index=True)
         position_points_sample = df_combine.sample(n=num_points,random_state=seed)
         position_points_sample = position_points_sample.sort_index()
-        return position_points_sample # 输出pd格式的
+        # start_pos = (float(df_R201.at[0,'XCOORD.']), float(df_R201.at[0,'YCOORD.']))
+
+        return position_points_sample, start_pos # 输出pd格式的
 def generates_points(num_points,seed):
     file_path_R1 = '/Users/zhangmiaohan/PycharmProjects/gurobi_test/tits_CMDVRP-CT/map/homberger_400_customer_instances/R1_4_1.TXT'
     np.random.seed(seed)
@@ -241,7 +244,7 @@ def visualize_tower_connections(G_air, G_ground):
 
 # 示例代码
 if __name__ == '__main__':
-    test_points = generate_points(50, 6)  # 使用 generate_points 函数生成测试点
+    test_points,start_pos = generate_points(50, 6)  # 使用 generate_points 函数生成测试点
     # test_points = generates_points(50, 6)  # 使用 generates_points 函数生成测试点
     G_air, G_ground, air_adj_matrix, air_positions, ground_adj_matrix, ground_positions = generate_graph(test_points, 1)# 使用 generate_graph 函数生成空中图
     # 可视化塔杆节点和线路
