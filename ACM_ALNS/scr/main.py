@@ -47,7 +47,7 @@ if __name__ == '__main__':
     vehicles_node = {}
     num_vehicles = 2  # 根据需求调整车辆数量
     vehicle_capacity = 2  # 每辆车携带的无人机数量
-    start_node_id = max(air_positions.keys()) + max(ground_positions.keys()) + 1  # 车辆起始节点编号(有效识别空中节点、地面节点及无人车几点代号)
+    start_node_id = max(air_positions.keys()) + max(ground_positions.keys()) + 2  # 车辆起始节点编号(有效识别空中节点、地面节点及无人车几点代号)
 
     # 设定无人机无人车信息
     for i in range(num_vehicles):
@@ -95,12 +95,5 @@ if __name__ == '__main__':
 
     # 执行破坏策略
 
-    # 输出初始解和目标函数值
-    print("初始编码解：")
-    print(encoded_solution)
-    print(f"\n初始最大完成时间：{max_completion_time}")
 
-    # 验证约束条件
-    for drone in drones:
-        if not initial_solution_generator.constraint_handler.check_drone_endurance(drone, air_graph):
-            print(f"无人机 {drone.id} 超过续航时间限制。")
+
